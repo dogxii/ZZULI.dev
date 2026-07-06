@@ -88,6 +88,7 @@ https://zzuli.dogxi.me
 | Ms_XiaoTian      | [MsXiaoT](https://github.com/MsXiaoT)                   |                                                  |
 | lj200612         | [lj200612](https://github.com/lj200612)                 |                                                  |
 | H.Y              | [mshzy](https://github.com/mshzy)                       |                                                  |
+| MoQix26          | [MoQix26](https://github.com/moqix26)                   |                                                  |
 
 ---
 
