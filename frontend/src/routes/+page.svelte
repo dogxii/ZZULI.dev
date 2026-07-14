@@ -5,7 +5,7 @@
 	type Theme = 'light' | 'dark'
 
 	const HOME_POST_LIMIT = 18
-	const SIDEBAR_MEMBER_LIMIT = 13
+	const SIDEBAR_MEMBER_LIMIT = 20
 
 	let { data }: { data: PageData } = $props()
 
@@ -169,6 +169,12 @@
 			</a>
 
 			<div class="flex items-center gap-2">
+				<a
+					href="/articles"
+					class="rounded-full px-3 py-1.5 text-sm font-medium text-[#4b5563] hover:bg-[#eef2f7] dark:text-[#b6beca] dark:hover:bg-[#202631]"
+				>
+					文章
+				</a>
 				<button
 					type="button"
 					onclick={() => (showAbout = true)}
@@ -197,7 +203,7 @@
 		</div>
 	</header>
 
-	<main class="mx-auto grid max-w-6xl gap-5 px-4 py-5 sm:px-6 md:grid-cols-[1fr_280px]">
+	<main class="mx-auto grid max-w-6xl gap-5 px-4 py-5 sm:px-6 md:grid-cols-[minmax(0,1fr)_320px] lg:grid-cols-[minmax(0,1fr)_340px]">
 		<section id="feed" class="min-w-0 overflow-hidden rounded-2xl bg-white shadow-[0_1px_3px_rgba(31,35,40,0.08)] dark:bg-[#15191f] dark:shadow-[0_1px_3px_rgba(0,0,0,0.35)]">
 			<div class="flex items-center justify-between gap-4 px-4 py-3 shadow-[0_1px_0_rgba(31,35,40,0.08)] dark:shadow-[0_1px_0_rgba(255,255,255,0.08)]">
 				<div class="flex min-w-0 items-center gap-3">
@@ -316,9 +322,9 @@
 				</div>
 			</section>
 
-			<section class="rounded-2xl bg-white p-4 shadow-[0_1px_3px_rgba(31,35,40,0.08)] dark:bg-[#15191f] dark:shadow-[0_1px_3px_rgba(0,0,0,0.35)]">
+			<section class="hidden rounded-2xl bg-white p-4 shadow-[0_1px_3px_rgba(31,35,40,0.08)] md:block dark:bg-[#15191f] dark:shadow-[0_1px_3px_rgba(0,0,0,0.35)]">
 				<h2 class="text-sm font-semibold">成员</h2>
-				<div class="mt-3 flex flex-wrap gap-2">
+				<div class="mt-3 grid grid-cols-7 gap-2">
 					{#each featuredMembers as person}
 						<a
 							href={person.github.url}
