@@ -1,0 +1,38 @@
+name: Collect blog posts
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 20 * * *'
+
+permissions:
+  contents: write
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Collect posts
+        run: npm --prefix frontend run collect:posts
+
+      - name: Commit updated data
+        run: |
+          if git diff --quiet -- data/blog-posts.json; then
+            echo "No blog post changes."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/blog-posts.json
+          git commit -m "chore: update blog posts"
+          git push

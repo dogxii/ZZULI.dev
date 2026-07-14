@@ -1,495 +1,525 @@
 <script lang="ts">
-  import ParticleBackground from '$lib/components/ParticleBackground.svelte'
-  import AvatarWall from '$lib/components/AvatarWall.svelte'
-  import { fly, slide } from 'svelte/transition'
-  import { onMount } from 'svelte'
-  import type { PageData } from './$types'
+	import { onMount } from 'svelte'
+	import type { PageData } from './$types'
 
-  let { data }: { data: PageData } = $props()
+	type Theme = 'light' | 'dark'
 
-  let searchTerm = $state('')
-  let activities = $state<
-    Array<{
-      user: string | null
-      type: string
-      repo: string
-      date: Date
-      avatar: string
-      url: string
-    }>
-  >([])
-  let loadingActivities = $state(true)
-  let rateLimitError = $state(false)
+	const HOME_POST_LIMIT = 18
+	const SIDEBAR_MEMBER_LIMIT = 13
 
-  // Computed Stats
-  let totalAlumni = $derived(data.alumni.length)
-  let totalProjects = $derived(data.projects.length)
-  let filteredAlumni = $derived(
-    data.alumni.filter((person) =>
-      person.nickname.toLowerCase().includes(searchTerm.toLowerCase()),
-    ),
-  )
+	let { data }: { data: PageData } = $props()
 
-  // Helper to get GitHub username from URL
-  const getUsername = (url: string | null): string | null => {
-    if (!url) return null
-    const match = url.match(/github\.com\/([^/]+)/)
-    return match ? match[1] : null
-  }
+	let theme = $state<Theme>('light')
+	let searchTerm = $state('')
+	let showAbout = $state(false)
+	let memberSample = $state<PageData['alumni']>([])
+	let memberOrder = $state<PageData['alumni']>([])
 
-  // Fetch recent activity from GitHub for a random subset of users
-  onMount(async () => {
-    const usernames = data.alumni
-      .map((p) => getUsername(p.github?.url))
-      .filter(Boolean)
+	let totalAlumni = $derived(data.alumni.length)
+	let totalProjects = $derived(data.projects.length)
+	let totalBlogs = $derived(data.alumni.filter((person) => person.blog?.url).length)
+	let healthyBlogSources = $derived(
+		data.blogSources?.filter((source) => source.status === 'ok').length ?? 0,
+	)
+	let normalizedSearch = $derived(searchTerm.trim().toLowerCase())
+	let orderedAlumni = $derived(memberOrder.length > 0 ? memberOrder : data.alumni)
+	let filteredAlumni = $derived(
+		orderedAlumni.filter((person) => {
+			if (!normalizedSearch) return true
 
-    // Shuffle and pick top 10 to avoid rate limits and keep it fast
-    const shuffled = usernames.sort(() => 0.5 - Math.random()).slice(0, 8)
+			return [
+				person.nickname,
+				person.github?.text,
+				person.github?.url,
+				person.blog?.text,
+				person.blog?.url,
+			]
+				.filter(Boolean)
+				.some((value) => value?.toLowerCase().includes(normalizedSearch))
+		}),
+	)
+	let homePosts = $derived(data.blogPosts)
+	let hasMorePosts = $derived(data.blogPostCount > HOME_POST_LIMIT)
+	let avatarMembers = $derived(data.alumni.filter((person) => person.avatar))
+	let featuredMembers = $derived(
+		memberSample.length > 0
+			? memberSample
+			: avatarMembers.slice(0, SIDEBAR_MEMBER_LIMIT),
+	)
+	let hiddenMemberCount = $derived(Math.max(0, avatarMembers.length - featuredMembers.length))
+	let alumniByName = $derived(new Map(data.alumni.map((person) => [person.nickname, person])))
+	let visibleSources = $derived((data.blogSources ?? []).slice(0, 10))
 
-    const requests = shuffled.map((username) =>
-      fetch(`https://api.github.com/users/${username}/events/public?per_page=3`)
-        .then((res) => {
-          // 检查是否触发限流
-          if (res.status === 403 || res.status === 429) {
-            rateLimitError = true
-            return []
-          }
-          if (!res.ok) return []
-          return res.json()
-        })
-        .then((events) => {
-          if (!Array.isArray(events)) return []
-          return events.map((e) => ({
-            user: username,
-            type: e.type,
-            repo: e.repo.name,
-            date: new Date(e.created_at),
-            avatar: e.actor.avatar_url,
-            url: `https://github.com/${e.repo.name}`,
-          }))
-        })
-        .catch((err) => {
-          console.error(`Failed to fetch events for ${username}:`, err)
-          return []
-        }),
-    )
+	onMount(() => {
+		const savedTheme = localStorage.getItem('zzuli-theme')
+		if (savedTheme === 'dark' || savedTheme === 'light') {
+			theme = savedTheme
+		}
 
-    const results = await Promise.all(requests)
-    activities = results
-      .flat()
-      .sort((a, b) => b.date.getTime() - a.date.getTime())
-      .slice(0, 15) // Keep top 15 recent events
+		memberSample = shuffleMembers(avatarMembers).slice(0, SIDEBAR_MEMBER_LIMIT)
+	})
 
-    loadingActivities = false
-  })
+	function shuffleMembers(members: PageData['alumni']) {
+		const shuffled = [...members]
 
-  function formatTime(date: Date): string {
-    const now = new Date()
-    const diff = (now.getTime() - date.getTime()) / 1000 // seconds
+		for (let index = shuffled.length - 1; index > 0; index -= 1) {
+			const swapIndex = Math.floor(Math.random() * (index + 1))
+			;[shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]]
+		}
 
-    if (diff < 60) return 'Just now'
-    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
-    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
-    return `${Math.floor(diff / 86400)}d ago`
-  }
+		return shuffled
+	}
 
-  function formatEventType(type: string): string {
-    switch (type) {
-      case 'PushEvent':
-        return 'pushed to'
-      case 'WatchEvent':
-        return 'starred'
-      case 'CreateEvent':
-        return 'created'
-      case 'ForkEvent':
-        return 'forked'
-      case 'IssuesEvent':
-        return 'opened issue in'
-      case 'PullRequestEvent':
-        return 'opened PR in'
-      default:
-        return 'contributed to'
-    }
-  }
+	function shuffleMemberList() {
+		memberOrder = shuffleMembers(data.alumni)
+	}
+
+	function toggleTheme() {
+		theme = theme === 'dark' ? 'light' : 'dark'
+		localStorage.setItem('zzuli-theme', theme)
+	}
+
+	function closeAboutOnEscape(event: KeyboardEvent) {
+		if (event.key === 'Escape') {
+			showAbout = false
+		}
+	}
+
+	function formatDate(value: string | null | undefined): string {
+		if (!value) return '未标日期'
+
+		const date = new Date(value)
+		if (Number.isNaN(date.getTime())) return '未标日期'
+
+		const isCurrentYear = date.getFullYear() === new Date().getFullYear()
+
+		return new Intl.DateTimeFormat(
+			'zh-CN',
+			isCurrentYear
+				? {
+						month: 'short',
+						day: 'numeric',
+					}
+				: {
+						year: 'numeric',
+						month: 'long',
+						day: 'numeric',
+					},
+		).format(date)
+	}
+
+	function formatGeneratedAt(value: string | null): string {
+		if (!value) return '等待采集'
+
+		const date = new Date(value)
+		if (Number.isNaN(date.getTime())) return '等待采集'
+
+		return new Intl.DateTimeFormat('zh-CN', {
+			month: 'short',
+			day: 'numeric',
+			hour: '2-digit',
+			minute: '2-digit',
+		}).format(date)
+	}
+
+	function getPostAvatar(sourceName: string): string | null {
+		return alumniByName.get(sourceName)?.avatar ?? null
+	}
+
+	function sourceStatusLabel(status: string): string {
+		switch (status) {
+			case 'ok':
+				return '正常'
+			case 'empty':
+				return '未发现'
+			case 'error':
+				return '失败'
+			default:
+				return status
+		}
+	}
 </script>
 
 <svelte:head>
-  <title>ZZULI Developers | Community Hub</title>
+	<title>ZZULI.dev | 开发者社区</title>
 </svelte:head>
 
-<ParticleBackground />
+<svelte:window onkeydown={closeAboutOnEscape} />
 
 <div
-  class="relative z-10 min-h-screen text-slate-300 font-sans selection:bg-cyan-500/30"
+	class:dark={theme === 'dark'}
+	class="min-h-screen bg-[#f3f5f7] text-[#202124] selection:bg-[#7dd3fc]/30 dark:bg-[#111418] dark:text-[#e8eaed]"
 >
-  <!-- Hero Section -->
-  <section class="relative pt-20 pb-2 overflow-hidden">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
-      <div
-        in:fly={{ y: 20, duration: 800, delay: 200 }}
-        class="inline-flex items-center px-3 py-1 rounded-full border border-cyan-500/30 bg-cyan-500/10 text-cyan-400 text-sm font-medium mb-8 backdrop-blur-sm"
-      >
-        <span class="flex h-2 w-2 rounded-full bg-cyan-400 mr-2 animate-pulse"
-        ></span>
-        ZZULI Open Source Community
-      </div>
+	<header class="sticky top-0 z-30 bg-[#fdfdfd]/90 shadow-[0_1px_0_rgba(31,35,40,0.08)] backdrop-blur dark:bg-[#15191f]/88 dark:shadow-[0_1px_0_rgba(255,255,255,0.08)]">
+		<div class="mx-auto flex h-14 max-w-6xl items-center justify-between gap-3 px-4 sm:px-6">
+			<a
+				href="#feed"
+				class="flex min-w-0 items-center gap-3"
+				aria-label="回到文章列表"
+			>
+				<img
+					src="logo.webp"
+					alt="ZZULI"
+					class="h-8 w-8 rounded-lg bg-white object-contain p-1 shadow-[0_0_0_1px_rgba(31,35,40,0.12)] dark:bg-[#1c2128] dark:shadow-[0_0_0_1px_rgba(255,255,255,0.12)]"
+				/>
+				<div class="min-w-0">
+					<p class="truncate text-sm font-semibold">ZZULI.dev</p>
+					<p class="truncate text-xs text-[#6b7280] dark:text-[#9aa4b2]">开发者社区</p>
+				</div>
+			</a>
 
-      <div
-        in:fly={{ y: 20, duration: 800, delay: 500 }}
-        class="flex justify-center items-center gap-6 mb-4"
-      >
-        <!-- ZZULI Logo -->
-        <a
-          href="https://github.com/dogxii/zzuli-developers"
-          target="_blank"
-          rel="noopener noreferrer"
-          class="hover:opacity-100 transition-opacity"
-          aria-label="GitHub Repository"
-        >
-          <img
-            src="https://image.dogxi.me/i/2025/12/16/zzuli.png.webp"
-            alt="zzuli logo"
-            class="h-24 md:h-32 opacity-90 hover:opacity-100 transition-all duration-500 drop-shadow-[0_0_20px_rgba(6,182,212,0.2)] hover:drop-shadow-[0_0_30px_rgba(6,182,212,0.4)]"
-          />
-        </a>
+			<div class="flex items-center gap-2">
+				<button
+					type="button"
+					onclick={() => (showAbout = true)}
+					class="rounded-full px-3 py-1.5 text-sm font-medium text-[#4b5563] hover:bg-[#eef2f7] dark:text-[#b6beca] dark:hover:bg-[#202631]"
+				>
+					关于
+				</button>
+				<button
+					type="button"
+					onclick={toggleTheme}
+					class="flex h-9 w-9 items-center justify-center rounded-full text-[#4b5563] hover:bg-[#eef2f7] dark:text-[#b6beca] dark:hover:bg-[#202631]"
+					aria-label="切换暗色模式"
+				>
+					{#if theme === 'dark'}
+						<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+							<path d="M12 4V2M12 22v-2M4 12H2M22 12h-2M5 5l1.5 1.5M17.5 17.5 19 19M19 5l-1.5 1.5M6.5 17.5 5 19" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+							<circle cx="12" cy="12" r="4" stroke="currentColor" stroke-width="1.8" />
+						</svg>
+					{:else}
+						<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+							<path d="M20.2 14.4A7.7 7.7 0 0 1 9.6 3.8 8.6 8.6 0 1 0 20.2 14.4Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" />
+						</svg>
+					{/if}
+				</button>
+			</div>
+		</div>
+	</header>
 
-        <!-- Cross Mark -->
-        <span class="text-slate-500 text-3xl font-thin opacity-70 select-none"
-          >✕</span
-        >
+	<main class="mx-auto grid max-w-6xl gap-5 px-4 py-5 sm:px-6 md:grid-cols-[1fr_280px]">
+		<section id="feed" class="min-w-0 overflow-hidden rounded-2xl bg-white shadow-[0_1px_3px_rgba(31,35,40,0.08)] dark:bg-[#15191f] dark:shadow-[0_1px_3px_rgba(0,0,0,0.35)]">
+			<div class="flex items-center justify-between gap-4 px-4 py-3 shadow-[0_1px_0_rgba(31,35,40,0.08)] dark:shadow-[0_1px_0_rgba(255,255,255,0.08)]">
+				<div class="flex min-w-0 items-center gap-3">
+					<h1 class="text-base font-semibold">文章</h1>
+					<span class="hidden truncate text-sm text-[#6b7280] sm:inline dark:text-[#9aa4b2]">
+						{data.blogPostCount} 篇 · {formatGeneratedAt(data.blogPostsGeneratedAt)}
+					</span>
+				</div>
+				<a
+					href="https://github.com/dogxii/zzuli-developers"
+					target="_blank"
+					rel="noopener noreferrer"
+					class="shrink-0 rounded-full bg-[#eef6ff] px-3 py-1 text-xs font-medium text-[#0969da] hover:bg-[#ddf4ff] dark:bg-[#10233a] dark:text-[#7cc4ff] dark:hover:bg-[#17314f]"
+				>
+					提交收录
+				</a>
+			</div>
 
-        <!-- GitHub Logo -->
-        <a
-          href="https://github.com/dogxii/zzuli-developers"
-          target="_blank"
-          rel="noopener noreferrer"
-          class="hover:opacity-100 transition-opacity"
-          aria-label="GitHub Repository"
-        >
-          <svg
-            viewBox="0 0 98 96"
-            class="h-20 md:h-28 text-white opacity-90 hover:opacity-100 transition-all duration-500 drop-shadow-[0_0_20px_rgba(255,255,255,0.2)] hover:drop-shadow-[0_0_30px_rgba(255,255,255,0.4)]"
-            fill="currentColor"
-            xmlns="http://www.w3.org/2000/svg"
-          >
-            <path
-              fill-rule="evenodd"
-              clip-rule="evenodd"
-              d="M48.854 0C21.839 0 0 22 0 49.217c0 21.756 13.993 40.172 33.405 46.69 2.427.49 3.316-1.059 3.316-2.362 0-1.141-.08-5.052-.08-9.127-13.59 2.934-16.42-5.867-16.42-5.867-2.184-5.704-5.42-7.17-5.42-7.17-4.448-3.015.324-3.015.324-3.015 4.934.326 7.523 5.052 7.523 5.052 4.367 7.496 11.404 5.378 14.235 4.074.404-3.178 1.699-5.378 3.074-6.6-10.839-1.141-22.243-5.378-22.243-24.283 0-5.378 1.94-9.778 5.014-13.2-.485-1.222-2.184-6.275.486-13.038 0 0 4.125-1.304 13.426 5.052a46.97 46.97 0 0 1 12.214-1.63c4.125 0 8.33.571 12.213 1.63 9.302-6.356 13.427-5.052 13.427-5.052 2.67 6.763.97 11.816.485 13.038 3.155 3.422 5.015 7.822 5.015 13.2 0 18.905-11.404 23.06-22.324 24.283 1.78 1.548 3.316 4.481 3.316 9.126 0 6.6-.08 11.897-.08 13.526 0 1.304.89 2.853 3.316 2.364 19.412-6.52 33.405-24.935 33.405-46.691C97.707 22 75.788 0 48.854 0z"
-            />
-          </svg>
-        </a>
-      </div>
+			{#if homePosts.length === 0}
+				<div class="px-5 py-12 text-sm text-[#6b7280] dark:text-[#9aa4b2]">
+					暂无文章数据。运行 <code class="rounded bg-[#eef2f7] px-1.5 py-0.5 dark:bg-[#202631]">npm --prefix frontend run collect:posts</code> 后会显示。
+				</div>
+			{:else}
+				<div>
+					{#each homePosts as post}
+						<a
+							href={post.url}
+							target="_blank"
+							rel="noopener noreferrer"
+							class="group flex gap-3 px-4 py-3 shadow-[0_1px_0_rgba(31,35,40,0.07)] last:shadow-none hover:bg-[#f8fafc] dark:shadow-[0_1px_0_rgba(255,255,255,0.07)] dark:hover:bg-[#1b2129]"
+						>
+							{#if getPostAvatar(post.sourceName)}
+								<img
+									src={getPostAvatar(post.sourceName)}
+									alt={post.sourceName}
+									class="mt-1 h-10 w-10 rounded-xl bg-[#eef2f7] object-cover dark:bg-[#202631]"
+									loading="lazy"
+									decoding="async"
+									referrerpolicy="no-referrer"
+								/>
+							{:else}
+								<div class="mt-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#eef6ff] text-sm font-semibold text-[#0969da] dark:bg-[#10233a] dark:text-[#7cc4ff]">
+									文
+								</div>
+							{/if}
 
-      <h1
-        in:fly={{ y: 20, duration: 800, delay: 300 }}
-        class="text-5xl md:text-7xl font-bold tracking-tight text-white mb-6"
-      >
-        Code the <span
-          class="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-indigo-500"
-          >Future</span
-        >
-      </h1>
+							<div class="min-w-0 flex-1">
+								<h2 class="line-clamp-2 text-[15px] font-semibold leading-6 text-[#1d4ed8] group-hover:text-[#0f3a9c] dark:text-[#80bfff] dark:group-hover:text-[#a7d5ff]">
+									{post.title}
+								</h2>
+								<div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-[#6b7280] dark:text-[#9aa4b2]">
+									<span class="font-medium text-[#374151] dark:text-[#cbd5e1]">{post.sourceName}</span>
+									<span>{formatDate(post.publishedAt)}</span>
+									<span>{post.discoveredBy === 'feed' ? 'RSS' : '网页'}</span>
+								</div>
+							</div>
+						</a>
+					{/each}
+				</div>
+				{#if hasMorePosts}
+					<div class="px-4 py-3 text-center shadow-[0_-1px_0_rgba(31,35,40,0.07)] dark:shadow-[0_-1px_0_rgba(255,255,255,0.07)]">
+						<a
+							href="/articles"
+							class="inline-flex items-center rounded-full px-3 py-1.5 text-sm font-medium text-[#0969da] hover:bg-[#eef6ff] dark:text-[#7cc4ff] dark:hover:bg-[#10233a]"
+						>
+							查看更多文章
+						</a>
+					</div>
+				{/if}
+			{/if}
+		</section>
 
-      <p
-        in:fly={{ y: 20, duration: 800, delay: 400 }}
-        class="max-w-2xl mx-auto text-xl text-slate-400 mb-10"
-      >
-        Building, sharing, and growing together.
-        <br />
-        构建，共享，成长
-      </p>
+		<aside class="space-y-4">
+			<section class="rounded-2xl bg-white p-4 shadow-[0_1px_3px_rgba(31,35,40,0.08)] dark:bg-[#15191f] dark:shadow-[0_1px_3px_rgba(0,0,0,0.35)]">
+				<div class="grid grid-cols-2 gap-3 text-sm">
+					<div>
+						<p class="text-xl font-semibold">{data.blogPostCount}</p>
+						<p class="text-[#6b7280] dark:text-[#9aa4b2]">文章</p>
+					</div>
+					<div>
+						<p class="text-xl font-semibold">{totalAlumni}</p>
+						<p class="text-[#6b7280] dark:text-[#9aa4b2]">成员</p>
+					</div>
+					<div>
+						<p class="text-xl font-semibold">{totalProjects}</p>
+						<p class="text-[#6b7280] dark:text-[#9aa4b2]">项目</p>
+					</div>
+					<div>
+						<p class="text-xl font-semibold">{healthyBlogSources}/{totalBlogs}</p>
+						<p class="text-[#6b7280] dark:text-[#9aa4b2]">文章源</p>
+					</div>
+				</div>
+			</section>
 
-      <!-- ZZULI Logo -->
-      <!-- <div
-        in:fly={{ y: 20, duration: 800, delay: 500 }}
-        class="flex justify-center mt-8"
-      >
-        <img
-          src="https://image.dogxi.me/i/2025/12/16/zzuli.png.webp"
-          alt="zzuli logo"
-          class="h-24 md:h-32 opacity-90 hover:opacity-100 transition-all duration-500 drop-shadow-[0_0_20px_rgba(6,182,212,0.2)] hover:drop-shadow-[0_0_30px_rgba(6,182,212,0.4)]"
-        />
-      </div> -->
-    </div>
-  </section>
+			<section
+				id="projects"
+				class="rounded-2xl bg-white shadow-[0_1px_3px_rgba(31,35,40,0.08)] dark:bg-[#15191f] dark:shadow-[0_1px_3px_rgba(0,0,0,0.35)]"
+			>
+				<div class="px-4 py-3 shadow-[0_1px_0_rgba(31,35,40,0.08)] dark:shadow-[0_1px_0_rgba(255,255,255,0.08)]">
+					<h2 class="text-sm font-semibold">项目</h2>
+				</div>
+				<div>
+					{#each data.projects as project}
+						<a
+							href={project.url}
+							target="_blank"
+							rel="noopener noreferrer"
+							class="block px-4 py-3 shadow-[0_1px_0_rgba(31,35,40,0.07)] last:shadow-none hover:bg-[#f8fafc] dark:shadow-[0_1px_0_rgba(255,255,255,0.07)] dark:hover:bg-[#1b2129]"
+						>
+							<p class="line-clamp-1 text-sm font-semibold text-[#1d4ed8] dark:text-[#80bfff]">{project.name}</p>
+							<p class="mt-1 line-clamp-2 text-xs leading-5 text-[#6b7280] dark:text-[#9aa4b2]">
+								{project.description}
+							</p>
+						</a>
+					{/each}
+				</div>
+			</section>
 
-  <!-- Avatar Wall -->
-  <div class="mb-20">
-    <AvatarWall alumni={data.alumni} />
-  </div>
+			<section class="rounded-2xl bg-white p-4 shadow-[0_1px_3px_rgba(31,35,40,0.08)] dark:bg-[#15191f] dark:shadow-[0_1px_3px_rgba(0,0,0,0.35)]">
+				<h2 class="text-sm font-semibold">成员</h2>
+				<div class="mt-3 flex flex-wrap gap-2">
+					{#each featuredMembers as person}
+						<a
+							href={person.github.url}
+							target="_blank"
+							rel="noopener noreferrer"
+							title={person.nickname}
+							class="rounded-xl hover:ring-2 hover:ring-[#7dd3fc]/60"
+						>
+							<img
+								src={person.avatar}
+								alt={person.nickname}
+								class="h-9 w-9 rounded-xl bg-[#eef2f7] object-cover dark:bg-[#202631]"
+								loading="lazy"
+								decoding="async"
+								referrerpolicy="no-referrer"
+							/>
+						</a>
+					{/each}
+					{#if hiddenMemberCount > 0}
+						<a
+							href="#members"
+							title={`还有 ${hiddenMemberCount} 位成员`}
+							aria-label={`还有 ${hiddenMemberCount} 位成员`}
+							class="flex h-9 w-9 items-center justify-center rounded-xl bg-[#f3f5f7] text-lg font-semibold leading-none text-[#6b7280] hover:bg-[#e5eaf0] dark:bg-[#202631] dark:text-[#9aa4b2] dark:hover:bg-[#2a3340]"
+						>
+							…
+						</a>
+					{/if}
+				</div>
+			</section>
+		</aside>
 
-  <div
-    class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 grid grid-cols-1 lg:grid-cols-3 gap-8 pb-20"
-  >
-    <!-- Left Column: Live Activity Feed -->
-    <div class="lg:col-span-1 space-y-8">
-      <div class="sticky top-8">
-        <h2 class="text-xl font-bold text-white mb-6 flex items-center">
-          <svg
-            class="w-5 h-5 mr-2 text-green-400"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-            ><path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M13 10V3L4 14h7v7l9-11h-7z"
-            ></path></svg
-          >
-          Community Pulse
-        </h2>
+		<section
+			id="members"
+			class="min-w-0 overflow-hidden rounded-2xl bg-white shadow-[0_1px_3px_rgba(31,35,40,0.08)] md:col-span-2 dark:bg-[#15191f] dark:shadow-[0_1px_3px_rgba(0,0,0,0.35)]"
+		>
+			<div class="flex flex-col gap-3 px-4 py-3 shadow-[0_1px_0_rgba(31,35,40,0.08)] sm:flex-row sm:items-center sm:justify-between dark:shadow-[0_1px_0_rgba(255,255,255,0.08)]">
+				<div>
+					<h2 class="text-sm font-semibold">成员</h2>
+					<p class="mt-0.5 text-xs text-[#6b7280] dark:text-[#9aa4b2]">{filteredAlumni.length}/{totalAlumni}</p>
+				</div>
+				<div class="flex w-full gap-2 sm:w-auto">
+					<label class="block min-w-0 flex-1 sm:w-80">
+						<span class="sr-only">搜索成员</span>
+						<input
+							type="search"
+							bind:value={searchTerm}
+							placeholder="搜索昵称、GitHub 或博客"
+							class="w-full rounded-full bg-[#f3f5f7] px-4 py-2 text-sm outline-none ring-1 ring-transparent focus:ring-[#7dd3fc] dark:bg-[#202631]"
+						/>
+					</label>
+					<button
+						type="button"
+						onclick={shuffleMemberList}
+						class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[#6b7280] hover:bg-[#eef2f7] dark:text-[#9aa4b2] dark:hover:bg-[#202631]"
+						aria-label="随机成员排序"
+						title="随机成员排序"
+					>
+						<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+							<path d="M16 3h5v5M4 20h2.5c2.5 0 4.1-1.1 5.5-3l1.4-2M4 4h2.5c2.5 0 4.1 1.1 5.5 3l4 6c1.4 1.9 3 3 5.5 3H22M16 21h5v-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+						</svg>
+					</button>
+				</div>
+			</div>
 
-        <div class="glass-card rounded-xl p-1 overflow-hidden min-h-[400px]">
-          {#if loadingActivities}
-            <div class="flex items-center justify-center h-64 text-slate-500">
-              <svg class="animate-spin h-5 w-5 mr-3" viewBox="0 0 24 24"
-                ><!-- ... --></svg
-              >
-              Syncing with GitHub...
-            </div>
-          {:else if rateLimitError}
-            <div class="p-6 text-center text-slate-500">
-              GitHub API rate limit exceeded. Please try again in an hour.
-            </div>
-          {:else if activities.length === 0}
-            <div class="p-6 text-center text-slate-500">
-              No recent public activity found.
-            </div>
-          {:else}
-            <div class="relative">
-              <!-- Vertical Line -->
-              <div
-                class="absolute left-6 top-4 bottom-4 w-px bg-slate-700/50"
-              ></div>
+			<div class="grid sm:grid-cols-2 lg:grid-cols-3">
+				{#each filteredAlumni as person}
+					<article class="px-4 py-3 shadow-[1px_1px_0_rgba(31,35,40,0.07)] dark:shadow-[1px_1px_0_rgba(255,255,255,0.07)]">
+						<div class="flex items-center gap-3">
+							{#if person.avatar}
+								<img
+									src={person.avatar}
+									alt={person.nickname}
+									class="h-10 w-10 rounded-xl bg-[#eef2f7] object-cover dark:bg-[#202631]"
+									loading="lazy"
+									decoding="async"
+									referrerpolicy="no-referrer"
+								/>
+							{:else}
+								<div class="flex h-10 w-10 items-center justify-center rounded-xl bg-[#eef2f7] text-sm font-semibold text-[#6b7280] dark:bg-[#202631] dark:text-[#9aa4b2]">
+									{person.nickname.charAt(0).toUpperCase()}
+								</div>
+							{/if}
 
-              <div class="space-y-0">
-                {#each activities as activity, i}
-                  <div
-                    in:slide|local={{ duration: 300, delay: i * 50 }}
-                    class="relative pl-12 pr-4 py-4 hover:bg-slate-800/30 transition-colors border-b border-slate-800/50 last:border-0 group"
-                  >
-                    <!-- Dot -->
-                    <div
-                      class="absolute left-[21px] top-6 w-1.5 h-1.5 rounded-full bg-slate-600 group-hover:bg-cyan-400 group-hover:scale-150 transition-all ring-4 ring-slate-900"
-                    ></div>
+							<div class="min-w-0 flex-1">
+								<h3 class="truncate text-sm font-semibold">{person.nickname}</h3>
+								<p class="truncate text-xs text-[#6b7280] dark:text-[#9aa4b2]">{person.github.text}</p>
+							</div>
+						</div>
 
-                    <div class="flex items-start justify-between">
-                      <div class="flex-1 min-w-0">
-                        <p class="text-sm text-slate-300">
-                          <a
-                            href={`https://github.com/${activity.user}`}
-                            class="font-semibold text-white hover:underline cursor-pointer"
-                            target="_blank"
-                            rel="noopener noreferrer">{activity.user}</a
-                          >
-                          <span class="text-slate-500"
-                            >{formatEventType(activity.type)}</span
-                          >
-                        </p>
-                        <a
-                          href={activity.url}
-                          target="_blank"
-                          class="text-xs font-mono text-cyan-400 hover:text-cyan-300 truncate block mt-0.5"
-                        >
-                          {activity.repo}
-                        </a>
-                      </div>
-                      <span
-                        class="text-[10px] text-slate-600 whitespace-nowrap ml-2"
-                        >{formatTime(activity.date)}</span
-                      >
-                    </div>
-                  </div>
-                {/each}
-              </div>
-            </div>
-          {/if}
-        </div>
+						<div class="mt-3 flex gap-2">
+							{#if person.github?.url}
+								<a
+									href={person.github.url}
+									target="_blank"
+									rel="noopener noreferrer"
+									class="rounded-full bg-[#f3f5f7] px-2.5 py-1 text-xs hover:bg-[#e5eaf0] dark:bg-[#202631] dark:hover:bg-[#2a3340]"
+								>
+									GitHub
+								</a>
+							{/if}
+							{#if person.blog?.url}
+								<a
+									href={person.blog.url}
+									target="_blank"
+									rel="noopener noreferrer"
+									class="rounded-full bg-[#eef6ff] px-2.5 py-1 text-xs text-[#0969da] hover:bg-[#ddf4ff] dark:bg-[#10233a] dark:text-[#7cc4ff] dark:hover:bg-[#17314f]"
+								>
+									博客
+								</a>
+							{/if}
+						</div>
+					</article>
+				{/each}
+			</div>
+		</section>
 
-        <!-- Featured Projects Mini List -->
-        <div class="mt-8">
-          <h2 class="text-xl font-bold text-white mb-6 flex items-center">
-            <svg
-              class="w-5 h-5 mr-2 text-yellow-400"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-              ><path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"
-              ></path></svg
-            >
-            Spotlight
-          </h2>
-          <div class="space-y-4">
-            {#each data.projects.slice(0, 3) as project}
-              <a
-                href={project.url}
-                target="_blank"
-                class="block glass-card p-4 rounded-lg hover:border-yellow-500/30 transition-all group"
-              >
-                <h3
-                  class="font-semibold text-white group-hover:text-yellow-400 transition-colors"
-                >
-                  {project.name}
-                </h3>
-                <p class="text-xs text-slate-500 mt-1 line-clamp-2">
-                  {project.description}
-                </p>
-              </a>
-            {/each}
-          </div>
-        </div>
-      </div>
-    </div>
+		<section
+			id="sources"
+			class="min-w-0 overflow-hidden rounded-2xl bg-white shadow-[0_1px_3px_rgba(31,35,40,0.08)] md:col-span-2 dark:bg-[#15191f] dark:shadow-[0_1px_3px_rgba(0,0,0,0.35)]"
+		>
+			<div class="px-4 py-3 shadow-[0_1px_0_rgba(31,35,40,0.08)] dark:shadow-[0_1px_0_rgba(255,255,255,0.08)]">
+				<h2 class="text-sm font-semibold">文章来源</h2>
+			</div>
+			<div class="grid sm:grid-cols-2 lg:grid-cols-5">
+				{#each visibleSources as source}
+					<a
+						href={source.url}
+						target="_blank"
+						rel="noopener noreferrer"
+						class="px-4 py-3 shadow-[1px_1px_0_rgba(31,35,40,0.07)] hover:bg-[#f8fafc] dark:shadow-[1px_1px_0_rgba(255,255,255,0.07)] dark:hover:bg-[#1b2129]"
+					>
+						<p class="truncate text-sm font-medium">{source.name}</p>
+						<p class="mt-1 truncate text-xs text-[#6b7280] dark:text-[#9aa4b2]">
+							{sourceStatusLabel(source.status)} · {source.itemCount} 条
+						</p>
+					</a>
+				{/each}
+			</div>
+		</section>
+	</main>
 
-    <!-- Right Column: Wall of Fame -->
-    <div class="lg:col-span-2">
-      <div
-        class="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-4"
-      >
-        <h2 class="text-2xl font-bold text-white">Wall of Fame</h2>
+	{#if showAbout}
+		<div
+			class="fixed inset-0 z-50 flex items-center justify-center bg-[#0f172a]/35 px-4 py-6 backdrop-blur-sm dark:bg-black/55"
+		>
+			<button
+				type="button"
+				class="absolute inset-0 cursor-default"
+				aria-label="关闭关于弹窗"
+				onclick={() => (showAbout = false)}
+			></button>
+			<div
+				class="relative z-10 w-full max-w-md rounded-2xl bg-white p-5 shadow-xl dark:bg-[#15191f]"
+				role="dialog"
+				aria-modal="true"
+				aria-labelledby="about-title"
+				tabindex="-1"
+			>
+				<div class="flex items-start justify-between gap-4">
+					<div>
+						<h2 id="about-title" class="text-lg font-semibold">关于 ZZULI.dev</h2>
+						<p class="mt-1 text-sm text-[#6b7280] dark:text-[#9aa4b2]">
+							ZZULI 开发者的成员和博客文章索引。
+						</p>
+					</div>
+					<button
+						type="button"
+						onclick={() => (showAbout = false)}
+						class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full hover:bg-[#eef2f7] dark:hover:bg-[#202631]"
+						aria-label="关闭关于弹窗"
+					>
+						<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+							<path d="m6 6 12 12M18 6 6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+						</svg>
+					</button>
+				</div>
 
-        <!-- Search -->
-        <div class="relative">
-          <input
-            type="text"
-            bind:value={searchTerm}
-            placeholder="Find a developer..."
-            class="bg-slate-800/50 border border-slate-700 text-white text-sm rounded-full px-4 py-2 pl-10 focus:outline-none focus:border-cyan-500 w-full sm:w-64 transition-all"
-          />
-          <svg
-            class="w-4 h-4 text-slate-500 absolute left-3.5 top-2.5"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-            ><path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-            ></path></svg
-          >
-        </div>
-      </div>
+				<div class="mt-5 space-y-3 text-sm">
+					<a
+						href="https://github.com/dogxii/zzuli-developers"
+						target="_blank"
+						rel="noopener noreferrer"
+						class="flex items-center justify-between rounded-xl bg-[#f3f5f7] px-4 py-3 hover:bg-[#e9eef5] dark:bg-[#202631] dark:hover:bg-[#2a3340]"
+					>
+						<span>GitHub 仓库</span>
+						<span class="text-[#1d4ed8] dark:text-[#80bfff]">dogxii/zzuli-developers</span>
+					</a>
+					<a
+						href="mailto:hi@dogxi.me"
+						class="flex items-center justify-between rounded-xl bg-[#f3f5f7] px-4 py-3 hover:bg-[#e9eef5] dark:bg-[#202631] dark:hover:bg-[#2a3340]"
+					>
+						<span>联系邮箱</span>
+						<span class="text-[#1d4ed8] dark:text-[#80bfff]">hi@dogxi.me</span>
+					</a>
+				</div>
 
-      <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-        {#each filteredAlumni as person}
-          <div
-            class="glass-card p-4 rounded-xl flex flex-col items-center text-center hover:scale-105 transition-transform duration-300 group relative overflow-hidden"
-          >
-            <!-- Hover Gradient Background -->
-            <div
-              class="absolute inset-0 bg-gradient-to-br from-cyan-500/10 to-indigo-500/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none"
-            ></div>
-
-            <div class="relative mb-3">
-              {#if person.avatar}
-                <img
-                  src={person.avatar}
-                  alt={person.nickname}
-                  class="w-16 h-16 rounded-full border-2 border-slate-700 group-hover:border-cyan-400 transition-all shadow-lg object-cover bg-slate-800"
-                  loading="lazy"
-                  decoding="async"
-                  referrerpolicy="no-referrer"
-                  onerror={(e) => {
-                    const target = e.currentTarget as HTMLImageElement
-                    if (target) {
-                      target.style.display = 'none'
-                      const fallback =
-                        target.parentElement?.querySelector('.fallback-avatar')
-                      if (fallback) {
-                        fallback.classList.remove('hidden')
-                        fallback.classList.add('flex')
-                      }
-                    }
-                  }}
-                />
-                <div
-                  class="hidden fallback-avatar absolute inset-0 items-center justify-center w-16 h-16 rounded-full bg-slate-800 border-2 border-slate-700 text-xl font-bold text-slate-400 group-hover:border-cyan-400 group-hover:text-white transition-all shadow-lg"
-                >
-                  {person.nickname.charAt(0).toUpperCase()}
-                </div>
-              {:else}
-                <div
-                  class="w-16 h-16 rounded-full bg-slate-800 border-2 border-slate-700 flex items-center justify-center text-xl font-bold text-slate-400 group-hover:border-cyan-400 group-hover:text-white transition-all shadow-lg"
-                >
-                  {person.nickname.charAt(0).toUpperCase()}
-                </div>
-              {/if}
-
-              {#if person.github}
-                <div
-                  class="absolute -bottom-1 -right-1 bg-slate-900 rounded-full p-1 border border-slate-700"
-                >
-                  <svg
-                    class="w-3 h-3 text-white"
-                    fill="currentColor"
-                    viewBox="0 0 24 24"
-                    ><path
-                      fill-rule="evenodd"
-                      d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"
-                      clip-rule="evenodd"
-                    /></svg
-                  >
-                </div>
-              {/if}
-            </div>
-
-            <h3
-              class="font-medium text-white truncate w-full px-2 relative z-10"
-            >
-              {person.nickname}
-            </h3>
-
-            <div
-              class="flex gap-2 mt-3 opacity-60 group-hover:opacity-100 transition-opacity relative z-10"
-            >
-              {#if person.github?.url}
-                <a
-                  href={person.github.url}
-                  target="_blank"
-                  class="p-1.5 rounded-md hover:bg-slate-700 text-slate-400 hover:text-white transition-colors"
-                  title="GitHub"
-                >
-                  <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"
-                    ><path
-                      fill-rule="evenodd"
-                      d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"
-                      clip-rule="evenodd"
-                    /></svg
-                  >
-                </a>
-              {/if}
-              {#if person.blog?.url}
-                <a
-                  href={person.blog.url}
-                  target="_blank"
-                  class="p-1.5 rounded-md hover:bg-slate-700 text-slate-400 hover:text-indigo-400 transition-colors"
-                  title="Blog"
-                >
-                  <svg
-                    class="w-4 h-4"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                    ><path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9a2 2 0 00-2-2h-2m-4-3H9M7 16h6M7 8h6v4H7V8z"
-                    ></path></svg
-                  >
-                </a>
-              {/if}
-            </div>
-          </div>
-        {/each}
-      </div>
-    </div>
-  </div>
+				<p class="mt-5 text-sm leading-6 text-[#6b7280] dark:text-[#9aa4b2]">
+					想加入可以直接提交 PR 修改 README，也可以在 GitHub 提 Issue。文章数据由定时脚本从成员博客抓取标题和链接。
+				</p>
+			</div>
+		</div>
+	{/if}
 </div>

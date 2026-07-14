@@ -1,35 +1,47 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 @layer base {
   html {
     scroll-behavior: smooth;
   }
 
   body {
-    @apply bg-[#0B1120] text-slate-400 antialiased selection:bg-cyan-500 selection:text-white;
+    @apply bg-[#f6f8fa] text-[#1f2328] antialiased selection:bg-[#2da44e]/20;
+  }
+
+  a,
+  button,
+  input {
+    @apply transition-colors;
   }
 }
 
 @layer utilities {
-  .glass-card {
-    @apply bg-slate-800/40 backdrop-blur-md border border-slate-700/50 shadow-xl;
+  .line-clamp-2 {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
   }
 
-  .text-gradient {
-    @apply bg-clip-text text-transparent bg-gradient-to-r from-cyan-400 to-indigo-500;
-  }
 }
 
-/* Custom Scrollbar */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
 }
 
 ::-webkit-scrollbar-track {
-  @apply bg-transparent;
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  @apply bg-slate-700 rounded-full hover:bg-slate-600 transition-colors;
+  background: #27272a;
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #3f3f46;
 }

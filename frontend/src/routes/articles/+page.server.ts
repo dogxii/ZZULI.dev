@@ -3,4 +3,4 @@ import type { PageServerLoad } from './$types'
 
 export const prerender = true
 
-export const load: PageServerLoad = async () => loadSiteData({ postLimit: 18 })
+export const load: PageServerLoad = async () => loadSiteData()
