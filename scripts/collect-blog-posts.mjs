@@ -647,7 +647,7 @@ async function collectSitemapPosts(homeUrl, source, fetchedAt) {
 			.filter((entry) => isLikelySitemapArticle(entry.loc, homeUrl))
 			.map((entry) => ({
 				...entry,
-				publishedAt: parseDate(entry.lastmod) ?? inferDateFromUrl(entry.loc),
+				publishedAt: inferDateFromUrl(entry.loc) ?? parseDate(entry.lastmod),
 			}))
 			.sort(
 				(a, b) =>
@@ -846,15 +846,27 @@ function parseDate(value) {
 }
 
 function inferDateFromUrl(value) {
+	const compactMatch = value.match(
+		/(?:^|[/-])(\d{4})[/-](\d{2})(\d{2})(?:\d{2})?(?:\.[a-z0-9]+)?(?:[?#]|$)/i,
+	)
+	if (compactMatch) {
+		return makeIsoDate(Number(compactMatch[1]), Number(compactMatch[2]), Number(compactMatch[3]))
+	}
+
 	const match = value.match(/(?:^|[/-])(\d{4})[/-](\d{1,2})(?:[/-](\d{1,2}))?/)
 	if (!match) return null
 
-	const year = Number(match[1])
-	const month = Number(match[2])
-	const day = Number(match[3] ?? 1)
-	const date = new Date(Date.UTC(year, month - 1, day))
+	return makeIsoDate(Number(match[1]), Number(match[2]), Number(match[3] ?? 1))
+}
 
-	return Number.isNaN(date.getTime()) ? null : date.toISOString()
+function makeIsoDate(year, month, day) {
+	const date = new Date(Date.UTC(year, month - 1, day))
+	const isValid =
+		date.getUTCFullYear() === year &&
+		date.getUTCMonth() === month - 1 &&
+		date.getUTCDate() === day
+
+	return isValid ? date.toISOString() : null
 }
 
 function titleFromUrl(value) {
