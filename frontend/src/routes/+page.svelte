@@ -1,8 +1,9 @@
 <script lang="ts">
+	import SiteHeader from '$lib/components/SiteHeader.svelte'
+	import { formatGeneratedAt, formatPostDate } from '$lib/format'
+	import { getNextTheme, getSavedTheme, saveTheme, type Theme } from '$lib/theme'
 	import { onMount } from 'svelte'
 	import type { PageData } from './$types'
-
-	type Theme = 'light' | 'dark'
 
 	const HOME_POST_LIMIT = 18
 	const SIDEBAR_MEMBER_LIMIT = 20
@@ -51,11 +52,7 @@
 	let visibleSources = $derived((data.blogSources ?? []).slice(0, 10))
 
 	onMount(() => {
-		const savedTheme = localStorage.getItem('zzuli-theme')
-		if (savedTheme === 'dark' || savedTheme === 'light') {
-			theme = savedTheme
-		}
-
+		theme = getSavedTheme() ?? theme
 		memberSample = shuffleMembers(avatarMembers).slice(0, SIDEBAR_MEMBER_LIMIT)
 	})
 
@@ -75,51 +72,14 @@
 	}
 
 	function toggleTheme() {
-		theme = theme === 'dark' ? 'light' : 'dark'
-		localStorage.setItem('zzuli-theme', theme)
+		theme = getNextTheme(theme)
+		saveTheme(theme)
 	}
 
 	function closeAboutOnEscape(event: KeyboardEvent) {
 		if (event.key === 'Escape') {
 			showAbout = false
 		}
-	}
-
-	function formatDate(value: string | null | undefined): string {
-		if (!value) return '未标日期'
-
-		const date = new Date(value)
-		if (Number.isNaN(date.getTime())) return '未标日期'
-
-		const isCurrentYear = date.getFullYear() === new Date().getFullYear()
-
-		return new Intl.DateTimeFormat(
-			'zh-CN',
-			isCurrentYear
-				? {
-						month: 'short',
-						day: 'numeric',
-					}
-				: {
-						year: 'numeric',
-						month: 'long',
-						day: 'numeric',
-					},
-		).format(date)
-	}
-
-	function formatGeneratedAt(value: string | null): string {
-		if (!value) return '等待采集'
-
-		const date = new Date(value)
-		if (Number.isNaN(date.getTime())) return '等待采集'
-
-		return new Intl.DateTimeFormat('zh-CN', {
-			month: 'short',
-			day: 'numeric',
-			hour: '2-digit',
-			minute: '2-digit',
-		}).format(date)
 	}
 
 	function getPostAvatar(sourceName: string): string | null {
@@ -150,58 +110,15 @@
 	class:dark={theme === 'dark'}
 	class="min-h-screen bg-[#f3f5f7] text-[#202124] selection:bg-[#7dd3fc]/30 dark:bg-[#111418] dark:text-[#e8eaed]"
 >
-	<header class="sticky top-0 z-30 bg-[#fdfdfd]/90 shadow-[0_1px_0_rgba(31,35,40,0.08)] backdrop-blur dark:bg-[#15191f]/88 dark:shadow-[0_1px_0_rgba(255,255,255,0.08)]">
-		<div class="mx-auto flex h-14 max-w-6xl items-center justify-between gap-3 px-4 sm:px-6">
-			<a
-				href="#feed"
-				class="flex min-w-0 items-center gap-3"
-				aria-label="回到文章列表"
-			>
-				<img
-					src="logo.webp"
-					alt="ZZULI"
-					class="h-8 w-8 rounded-lg bg-white object-contain p-1 shadow-[0_0_0_1px_rgba(31,35,40,0.12)] dark:bg-[#1c2128] dark:shadow-[0_0_0_1px_rgba(255,255,255,0.12)]"
-				/>
-				<div class="min-w-0">
-					<p class="truncate text-sm font-semibold">ZZULI.dev</p>
-					<p class="truncate text-xs text-[#6b7280] dark:text-[#9aa4b2]">开发者社区</p>
-				</div>
-			</a>
-
-			<div class="flex items-center gap-2">
-				<a
-					href="/articles"
-					class="rounded-full px-3 py-1.5 text-sm font-medium text-[#4b5563] hover:bg-[#eef2f7] dark:text-[#b6beca] dark:hover:bg-[#202631]"
-				>
-					文章
-				</a>
-				<button
-					type="button"
-					onclick={() => (showAbout = true)}
-					class="rounded-full px-3 py-1.5 text-sm font-medium text-[#4b5563] hover:bg-[#eef2f7] dark:text-[#b6beca] dark:hover:bg-[#202631]"
-				>
-					关于
-				</button>
-				<button
-					type="button"
-					onclick={toggleTheme}
-					class="flex h-9 w-9 items-center justify-center rounded-full text-[#4b5563] hover:bg-[#eef2f7] dark:text-[#b6beca] dark:hover:bg-[#202631]"
-					aria-label="切换暗色模式"
-				>
-					{#if theme === 'dark'}
-						<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-							<path d="M12 4V2M12 22v-2M4 12H2M22 12h-2M5 5l1.5 1.5M17.5 17.5 19 19M19 5l-1.5 1.5M6.5 17.5 5 19" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
-							<circle cx="12" cy="12" r="4" stroke="currentColor" stroke-width="1.8" />
-						</svg>
-					{:else}
-						<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-							<path d="M20.2 14.4A7.7 7.7 0 0 1 9.6 3.8 8.6 8.6 0 1 0 20.2 14.4Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" />
-						</svg>
-					{/if}
-				</button>
-			</div>
-		</div>
-	</header>
+	<SiteHeader
+		brandAriaLabel="回到文章列表"
+		brandHref="#feed"
+		onAbout={() => (showAbout = true)}
+		onToggleTheme={toggleTheme}
+		showArticlesLink
+		subtitle="开发者社区"
+		{theme}
+	/>
 
 	<main class="mx-auto grid max-w-6xl gap-5 px-4 py-5 sm:px-6 md:grid-cols-[minmax(0,1fr)_320px] lg:grid-cols-[minmax(0,1fr)_340px]">
 		<section id="feed" class="min-w-0 overflow-hidden rounded-2xl bg-white shadow-[0_1px_3px_rgba(31,35,40,0.08)] dark:bg-[#15191f] dark:shadow-[0_1px_3px_rgba(0,0,0,0.35)]">
@@ -256,7 +173,7 @@
 								</h2>
 								<div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-[#6b7280] dark:text-[#9aa4b2]">
 									<span class="font-medium text-[#374151] dark:text-[#cbd5e1]">{post.sourceName}</span>
-									<span>{formatDate(post.publishedAt)}</span>
+									<span>{formatPostDate(post.publishedAt)}</span>
 									<span>{post.discoveredBy === 'feed' ? 'RSS' : '网页'}</span>
 								</div>
 							</div>
